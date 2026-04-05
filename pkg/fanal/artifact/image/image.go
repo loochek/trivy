@@ -436,6 +436,18 @@ func (a Artifact) inspect(ctx context.Context, missingImage string, layerKeys, b
 func (a Artifact) inspectLayer(ctx context.Context, layer types.Layer, disabled []analyzer.Type) (types.BlobInfo, error) {
 	a.logger.Debug("Missing diff ID in cache", log.String("diff_id", layer.DiffID))
 
+	// Try eStargz lazy-fetch path when enabled.
+	if a.artifactOption.EStargz {
+		staticPaths, canUse := a.analyzer.StaticPaths(disabled)
+		if canUse {
+			blobInfo, _, err := a.inspectLayerEStargz(ctx, layer, staticPaths, disabled)
+			if err == nil {
+				return blobInfo, nil
+			}
+			a.logger.Debug("eStargz fallback to full download", log.String("reason", err.Error()))
+		}
+	}
+
 	layerDigest, rc, err := a.uncompressedLayer(layer.DiffID)
 	if err != nil {
 		return types.BlobInfo{}, xerrors.Errorf("unable to get uncompressed layer %s: %w", layer.DiffID, err)

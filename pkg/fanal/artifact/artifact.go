@@ -42,6 +42,10 @@ type Option struct {
 	RepoCommit string
 	RepoTag    string
 
+	// EStargz enables lazy layer fetching via HTTP Range requests for eStargz-formatted images.
+	// Only static-path analyzers are supported; falls back to full download otherwise.
+	EStargz bool
+
 	// For image scanning
 	ImageOption types.ImageOptions
 

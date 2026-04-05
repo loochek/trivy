@@ -67,6 +67,11 @@ var (
 		Default:    "",
 		Usage:      "[EXPERIMENTAL] maximum image size to process, specified in a human-readable format (e.g., '44kB', '17MB'); an error will be returned if the image exceeds this size",
 	}
+	EStargzFlag = Flag[bool]{
+		Name:       "estargz",
+		ConfigName: "image.estargz",
+		Usage:      "[EXPERIMENTAL] use eStargz lazy layer fetching — downloads only the files needed for analysis via HTTP Range requests; requires eStargz-formatted images",
+	}
 )
 
 type ImageFlagGroup struct {
@@ -78,6 +83,7 @@ type ImageFlagGroup struct {
 	PodmanHost          *Flag[string]
 	ImageSources        *Flag[[]string]
 	MaxImageSize        *Flag[string]
+	EStargz             *Flag[bool]
 }
 
 type ImageOptions struct {
@@ -89,6 +95,7 @@ type ImageOptions struct {
 	PodmanHost          string
 	ImageSources        ftypes.ImageSources
 	MaxImageSize        int64
+	EStargz             bool
 }
 
 func NewImageFlagGroup() *ImageFlagGroup {
@@ -101,6 +108,7 @@ func NewImageFlagGroup() *ImageFlagGroup {
 		PodmanHost:          PodmanHostFlag.Clone(),
 		ImageSources:        SourceFlag.Clone(),
 		MaxImageSize:        MaxImageSize.Clone(),
+		EStargz:             EStargzFlag.Clone(),
 	}
 }
 
@@ -118,6 +126,7 @@ func (f *ImageFlagGroup) Flags() []Flagger {
 		f.PodmanHost,
 		f.ImageSources,
 		f.MaxImageSize,
+		f.EStargz,
 	}
 }
 
@@ -151,6 +160,7 @@ func (f *ImageFlagGroup) ToOptions(opts *Options) error {
 		PodmanHost:          f.PodmanHost.Value(),
 		ImageSources:        xstrings.ToTSlice[ftypes.ImageSource](f.ImageSources.Value()),
 		MaxImageSize:        maxSize,
+		EStargz:             f.EStargz.Value(),
 	}
 	return nil
 }
