@@ -437,9 +437,11 @@ func (a Artifact) inspectLayer(ctx context.Context, layer types.Layer, disabled 
 	a.logger.Debug("Missing diff ID in cache", log.String("diff_id", layer.DiffID))
 
 	// Try eStargz lazy-fetch path when enabled.
+	// Uses PartialStaticPaths so that analyzers without StaticPathAnalyzer (executable, secret, etc.)
+	// are skipped rather than blocking the optimized path entirely.
 	if a.artifactOption.EStargz {
-		staticPaths, canUse := a.analyzer.StaticPaths(disabled)
-		if canUse {
+		staticPaths := a.analyzer.PartialStaticPaths(disabled)
+		if len(staticPaths) > 0 {
 			blobInfo, _, err := a.inspectLayerEStargz(ctx, layer, staticPaths, disabled)
 			if err == nil {
 				return blobInfo, nil

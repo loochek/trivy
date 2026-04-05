@@ -625,3 +625,31 @@ func (ag AnalyzerGroup) StaticPaths(disabled []Type) ([]string, bool) {
 	// Remove duplicates
 	return lo.Uniq(paths), true
 }
+
+// PartialStaticPaths collects static paths from all enabled analyzers that implement StaticPathAnalyzer.
+// Unlike StaticPaths, it does not require ALL analyzers to implement the interface — analyzers without
+// StaticPathAnalyzer are simply skipped. This is used for eStargz lazy-pull mode where only
+// package-metadata files need to be fetched; analyzers that require full filesystem traversal
+// (e.g. executable, secret) are skipped but should be disabled by the caller if completeness matters.
+func (ag AnalyzerGroup) PartialStaticPaths(disabled []Type) []string {
+	var paths []string
+
+	type analyzerType interface{ Type() Type }
+	allAnalyzers := append(
+		xslices.Map(ag.analyzers, func(a analyzer) analyzerType { return a }),
+		xslices.Map(ag.postAnalyzers, func(a PostAnalyzer) analyzerType { return a })...,
+	)
+
+	for _, a := range allAnalyzers {
+		if slices.Contains(disabled, a.Type()) {
+			continue
+		}
+		staticPathAnalyzer, ok := a.(StaticPathAnalyzer)
+		if !ok {
+			continue
+		}
+		paths = append(paths, staticPathAnalyzer.StaticPaths()...)
+	}
+
+	return lo.Uniq(paths)
+}
