@@ -32,13 +32,21 @@ func WalkEStargz(sr *io.SectionReader, staticPaths []string, fn WalkFunc) error 
 			continue
 		}
 
-		// Buffer the decompressed file into memory so that analyzers performing
-		// random I/O (e.g. SQLite RPM databases) don't cause repeated HTTP Range
-		// requests for the same gzip chunks. Without buffering, each ReadAt at a
-		// different offset triggers a fresh gzip decompression from the chunk
-		// boundary, causing bytes_fetched >> layer_size.
-		data, err := io.ReadAll(fileSR)
-		if err != nil {
+		// Buffer the decompressed file with a single ReadAt for the whole size.
+		//
+		// The eStargz fileReader.ReadAt creates a fresh bufio.Reader and calls
+		// Peek(2MB) on every invocation, making one HTTP Range request per call
+		// regardless of how many bytes are actually requested. io.ReadAll / io.Copy
+		// translate to many small Read calls → many ReadAt calls → bytes_fetched
+		// balloons to (num_reads × 2MB) >> layer_size.
+		//
+		// Calling ReadAt once with the full decompressed size means the single
+		// bufio.Reader refills sequentially as it decompresses, so total HTTP
+		// traffic ≈ compressed_file_size ≤ layer_size.
+		data := make([]byte, ent.Size)
+		n, readErr := fileSR.ReadAt(data, 0)
+		data = data[:n]
+		if readErr != nil && readErr != io.EOF {
 			continue
 		}
 
