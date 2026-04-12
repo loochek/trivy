@@ -1,6 +1,7 @@
 package walker
 
 import (
+	"bytes"
 	"io"
 	"io/fs"
 	"path"
@@ -31,8 +32,18 @@ func WalkEStargz(sr *io.SectionReader, staticPaths []string, fn WalkFunc) error 
 			continue
 		}
 
+		// Buffer the decompressed file into memory so that analyzers performing
+		// random I/O (e.g. SQLite RPM databases) don't cause repeated HTTP Range
+		// requests for the same gzip chunks. Without buffering, each ReadAt at a
+		// different offset triggers a fresh gzip decompression from the chunk
+		// boundary, causing bytes_fetched >> layer_size.
+		data, err := io.ReadAll(fileSR)
+		if err != nil {
+			continue
+		}
+
 		if err := fn(p, &tocFileInfo{e: ent}, func() (xio.ReadSeekCloserAt, error) {
-			return xio.NopCloser(fileSR), nil
+			return xio.NopCloser(bytes.NewReader(data)), nil
 		}); err != nil {
 			return err
 		}
