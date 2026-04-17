@@ -1,6 +1,7 @@
 package walker
 
 import (
+	"archive/tar"
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
@@ -92,14 +93,25 @@ func readTOC(sr *io.SectionReader) (*estargz.JTOC, error) {
 		return nil, fmt.Errorf("read TOC bytes: %w", err)
 	}
 
+	// TOC is stored as gzip(tar(stargz.index.json)) — not plain gzip+JSON.
 	gr, err := gzip.NewReader(bytes.NewReader(tocBytes))
 	if err != nil {
 		return nil, fmt.Errorf("TOC gzip reader: %w", err)
 	}
+	gr.Multistream(false)
 	defer gr.Close()
 
+	tr := tar.NewReader(gr)
+	hdr, err := tr.Next()
+	if err != nil {
+		return nil, fmt.Errorf("TOC tar entry: %w", err)
+	}
+	if hdr.Name != estargz.TOCTarName {
+		return nil, fmt.Errorf("unexpected TOC tar entry name %q, want %q", hdr.Name, estargz.TOCTarName)
+	}
+
 	var jtoc estargz.JTOC
-	if err := json.NewDecoder(gr).Decode(&jtoc); err != nil {
+	if err := json.NewDecoder(tr).Decode(&jtoc); err != nil {
 		return nil, fmt.Errorf("decode TOC JSON: %w", err)
 	}
 	return &jtoc, nil
