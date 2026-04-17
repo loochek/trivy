@@ -183,7 +183,6 @@ func blobURL(imageName string, layerDigest v1.Hash) (string, error) {
 func (a Artifact) inspectLayerEStargz(
 	ctx context.Context,
 	layer types.Layer,
-	staticPaths []string,
 	disabled []analyzer.Type,
 ) (types.BlobInfo, int64, error) {
 	// Resolve the v1.Layer to get compressed digest and size.
@@ -226,7 +225,9 @@ func (a Artifact) inspectLayerEStargz(
 	}
 	defer composite.Cleanup()
 
-	err = walker.WalkEStargz(sr, staticPaths, func(filePath string, info os.FileInfo, opener analyzer.Opener) error {
+	err = walker.WalkEStargz(sr, func(filePath string, info os.FileInfo) bool {
+		return a.analyzer.IsRequired(filePath, info, disabled)
+	}, func(filePath string, info os.FileInfo, opener analyzer.Opener) error {
 		if err := a.analyzer.AnalyzeFile(egCtx, eg, limit, result, "", filePath, info, opener, disabled, opts); err != nil {
 			return xerrors.Errorf("analyze %s: %w", filePath, err)
 		}

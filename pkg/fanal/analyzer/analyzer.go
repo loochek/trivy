@@ -626,30 +626,25 @@ func (ag AnalyzerGroup) StaticPaths(disabled []Type) ([]string, bool) {
 	return lo.Uniq(paths), true
 }
 
-// PartialStaticPaths collects static paths from all enabled analyzers that implement StaticPathAnalyzer.
-// Unlike StaticPaths, it does not require ALL analyzers to implement the interface — analyzers without
-// StaticPathAnalyzer are simply skipped. This is used for eStargz lazy-pull mode where only
-// package-metadata files need to be fetched; analyzers that require full filesystem traversal
-// (e.g. executable, secret) are skipped but should be disabled by the caller if completeness matters.
-func (ag AnalyzerGroup) PartialStaticPaths(disabled []Type) []string {
-	var paths []string
-
-	type analyzerType interface{ Type() Type }
-	allAnalyzers := append(
-		xslices.Map(ag.analyzers, func(a analyzer) analyzerType { return a }),
-		xslices.Map(ag.postAnalyzers, func(a PostAnalyzer) analyzerType { return a })...,
-	)
-
-	for _, a := range allAnalyzers {
+// IsRequired returns true if any enabled analyzer or post-analyzer wants the given file.
+// Used by the eStargz TOC walker to decide which files to fetch via Range requests.
+func (ag AnalyzerGroup) IsRequired(filePath string, info os.FileInfo, disabled []Type) bool {
+	cleanPath := strings.TrimLeft(filePath, "/")
+	for _, a := range ag.analyzers {
 		if slices.Contains(disabled, a.Type()) {
 			continue
 		}
-		staticPathAnalyzer, ok := a.(StaticPathAnalyzer)
-		if !ok {
+		if ag.filePatterns[a.Type()].Match(cleanPath) || a.Required(cleanPath, info) {
+			return true
+		}
+	}
+	for _, a := range ag.postAnalyzers {
+		if slices.Contains(disabled, a.Type()) {
 			continue
 		}
-		paths = append(paths, staticPathAnalyzer.StaticPaths()...)
+		if ag.filePatterns[a.Type()].Match(filePath) || a.Required(filePath, info) {
+			return true
+		}
 	}
-
-	return lo.Uniq(paths)
+	return false
 }
