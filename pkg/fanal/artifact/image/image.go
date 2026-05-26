@@ -144,8 +144,37 @@ func (a Artifact) Inspect(ctx context.Context) (ref artifact.Reference, err erro
 		missingImageKey = ""
 	}
 
-	if err = a.inspect(ctx, missingImageKey, missingLayers, baseDiffIDs, layerKeyMap, configFile); err != nil {
+	missingLayerStats, err := a.inspect(ctx, missingImageKey, missingLayers, baseDiffIDs, layerKeyMap, configFile)
+	if err != nil {
 		return artifact.Reference{}, xerrors.Errorf("analyze error: %w", err)
+	}
+
+	if a.artifactOption.StatsFile != "" {
+		missingSet := make(map[string]bool, len(missingLayers))
+		for _, key := range missingLayers {
+			missingSet[key] = true
+		}
+		statsByDiffID := make(map[string]LayerStat, len(missingLayerStats))
+		for _, s := range missingLayerStats {
+			statsByDiffID[s.DiffID] = s
+		}
+		allStats := make([]LayerStat, 0, len(layerKeys))
+		for _, key := range layerKeys {
+			layer := layerKeyMap[key]
+			if missingSet[key] {
+				if s, ok := statsByDiffID[layer.DiffID]; ok {
+					allStats = append(allStats, s)
+				}
+			} else {
+				allStats = append(allStats, LayerStat{DiffID: layer.DiffID, Cached: true})
+			}
+		}
+		if werr := writeScanStats(a.artifactOption.StatsFile, ScanStats{
+			Image:  a.image.Name(),
+			Layers: allStats,
+		}); werr != nil {
+			a.logger.Warn("Failed to write scan stats", log.Err(werr))
+		}
 	}
 
 	repoTags := a.image.RepoTags()
@@ -391,9 +420,11 @@ func (a Artifact) saveLayer(diffID string) (int64, error) {
 }
 
 func (a Artifact) inspect(ctx context.Context, missingImage string, layerKeys, baseDiffIDs []string,
-	layerKeyMap map[string]types.Layer, configFile *v1.ConfigFile) error {
+	layerKeyMap map[string]types.Layer, configFile *v1.ConfigFile) ([]LayerStat, error) {
 
 	var osFound types.OS
+	var layerStats []LayerStat // accumulated by onResult (main goroutine — no lock needed)
+
 	p := parallel.NewPipeline(a.artifactOption.Parallel, false, layerKeys, func(ctx context.Context,
 		layerKey string) (any, error) {
 		layer := layerKeyMap[layerKey]
@@ -404,51 +435,52 @@ func (a Artifact) inspect(ctx context.Context, missingImage string, layerKeys, b
 			disabledAnalyzers = append(disabledAnalyzers, analyzer.TypeSecret)
 		}
 
-		layerInfo, err := a.inspectLayer(ctx, layer, disabledAnalyzers)
+		layerInfo, stat, err := a.inspectLayer(ctx, layer, disabledAnalyzers)
 		if err != nil {
 			return nil, xerrors.Errorf("failed to analyze layer (%s): %w", layer.DiffID, err)
 		}
 		if err = a.cache.PutBlob(ctx, layerKey, layerInfo); err != nil {
 			return nil, xerrors.Errorf("failed to store layer: %s in cache: %w", layerKey, err)
 		}
-		return layerInfo.OS, nil
+		return inspectLayerResult{os: layerInfo.OS, stat: stat}, nil
 
 	}, func(res any) error {
 		// To avoid race condition, merge OS info in the onResult function (main goroutine)
-		osInfo := res.(types.OS)
-		osFound.Merge(osInfo)
+		r := res.(inspectLayerResult)
+		osFound.Merge(r.os)
+		layerStats = append(layerStats, r.stat)
 		return nil
 	})
 
 	if err := p.Do(ctx); err != nil {
-		return xerrors.Errorf("pipeline error: %w", err)
+		return nil, xerrors.Errorf("pipeline error: %w", err)
 	}
 
 	if missingImage != "" {
 		if err := a.inspectConfig(ctx, missingImage, osFound, configFile); err != nil {
-			return xerrors.Errorf("unable to analyze config: %w", err)
+			return nil, xerrors.Errorf("unable to analyze config: %w", err)
 		}
 	}
 
-	return nil
+	return layerStats, nil
 }
 
-func (a Artifact) inspectLayer(ctx context.Context, layer types.Layer, disabled []analyzer.Type) (types.BlobInfo, error) {
+func (a Artifact) inspectLayer(ctx context.Context, layer types.Layer, disabled []analyzer.Type) (types.BlobInfo, LayerStat, error) {
 	a.logger.Debug("Missing diff ID in cache", log.String("diff_id", layer.DiffID))
 
 	// Try eStargz lazy-fetch path when enabled.
 	// Uses the TOC to enumerate files and fetches only those required by enabled analyzers.
 	if a.artifactOption.EStargz {
-		blobInfo, _, err := a.inspectLayerEStargz(ctx, layer, disabled)
+		blobInfo, _, stat, err := a.inspectLayerEStargz(ctx, layer, disabled)
 		if err == nil {
-			return blobInfo, nil
+			return blobInfo, stat, nil
 		}
 		a.logger.Debug("eStargz fallback to full download", log.String("reason", err.Error()))
 	}
 
 	layerDigest, rc, err := a.uncompressedLayer(layer.DiffID)
 	if err != nil {
-		return types.BlobInfo{}, xerrors.Errorf("unable to get uncompressed layer %s: %w", layer.DiffID, err)
+		return types.BlobInfo{}, LayerStat{}, xerrors.Errorf("unable to get uncompressed layer %s: %w", layer.DiffID, err)
 	}
 	defer rc.Close()
 
@@ -470,12 +502,24 @@ func (a Artifact) inspectLayer(ctx context.Context, layer types.Layer, disabled 
 	// Prepare filesystem for post analysis
 	composite, err := a.analyzer.PostAnalyzerFS()
 	if err != nil {
-		return types.BlobInfo{}, xerrors.Errorf("unable to get post analysis filesystem: %w", err)
+		return types.BlobInfo{}, LayerStat{}, xerrors.Errorf("unable to get post analysis filesystem: %w", err)
 	}
 	defer composite.Cleanup()
 
+	statsEnabled := a.artifactOption.StatsFile != ""
+	var layerFiles []FileStat
+
 	// Walk a tar layer
 	opqDirs, whFiles, err := a.walker.Walk(cr, func(filePath string, info os.FileInfo, opener analyzer.Opener) error {
+		if statsEnabled {
+			layerFiles = append(layerFiles, FileStat{
+				Name:     filePath,
+				Size:     info.Size(),
+				Type:     fileType(info),
+				Required: a.analyzer.IsRequired(filePath, info, disabled),
+			})
+		}
+
 		if err = a.analyzer.AnalyzeFile(egCtx, eg, limit, result, "", filePath, info, opener, disabled, opts); err != nil {
 			return xerrors.Errorf("failed to analyze %s: %w", filePath, err)
 		}
@@ -498,17 +542,17 @@ func (a Artifact) inspectLayer(ctx context.Context, layer types.Layer, disabled 
 		return nil
 	})
 	if err != nil {
-		return types.BlobInfo{}, xerrors.Errorf("walk error: %w", err)
+		return types.BlobInfo{}, LayerStat{}, xerrors.Errorf("walk error: %w", err)
 	}
 
 	// Wait for all the goroutine to finish and check errors
 	if err = eg.Wait(); err != nil {
-		return types.BlobInfo{}, xerrors.Errorf("analyze error: %w", err)
+		return types.BlobInfo{}, LayerStat{}, xerrors.Errorf("analyze error: %w", err)
 	}
 
 	// Post-analysis
 	if err = a.analyzer.PostAnalyze(ctx, composite, result, opts); err != nil {
-		return types.BlobInfo{}, xerrors.Errorf("post analysis error: %w", err)
+		return types.BlobInfo{}, LayerStat{}, xerrors.Errorf("post analysis error: %w", err)
 	}
 
 	// Read the remaining bytes for blocking factor to calculate the correct layer size
@@ -541,10 +585,11 @@ func (a Artifact) inspectLayer(ctx context.Context, layer types.Layer, disabled 
 
 	// Call post handlers to modify blob info
 	if err = a.handlerManager.PostHandle(ctx, result, &blobInfo); err != nil {
-		return types.BlobInfo{}, xerrors.Errorf("post handler error: %w", err)
+		return types.BlobInfo{}, LayerStat{}, xerrors.Errorf("post handler error: %w", err)
 	}
 
-	return blobInfo, nil
+	stat := LayerStat{DiffID: layer.DiffID, Files: layerFiles}
+	return blobInfo, stat, nil
 }
 
 func (a Artifact) diffIDs(configFile *v1.ConfigFile) []string {

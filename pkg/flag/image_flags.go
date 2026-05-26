@@ -72,6 +72,12 @@ var (
 		ConfigName: "image.estargz",
 		Usage:      "[EXPERIMENTAL] use eStargz lazy layer fetching — downloads only the files needed for analysis via HTTP Range requests; requires eStargz-formatted images",
 	}
+	StatsFileFlag = Flag[string]{
+		Name:       "stats-file",
+		ConfigName: "image.stats-file",
+		Default:    "",
+		Usage:      "write per-layer file statistics to this JSON file path (records each file's name, size, type, and whether any analyzer required it)",
+	}
 )
 
 type ImageFlagGroup struct {
@@ -84,6 +90,7 @@ type ImageFlagGroup struct {
 	ImageSources        *Flag[[]string]
 	MaxImageSize        *Flag[string]
 	EStargz             *Flag[bool]
+	StatsFile           *Flag[string]
 }
 
 type ImageOptions struct {
@@ -96,6 +103,7 @@ type ImageOptions struct {
 	ImageSources        ftypes.ImageSources
 	MaxImageSize        int64
 	EStargz             bool
+	StatsFile           string
 }
 
 func NewImageFlagGroup() *ImageFlagGroup {
@@ -109,6 +117,7 @@ func NewImageFlagGroup() *ImageFlagGroup {
 		ImageSources:        SourceFlag.Clone(),
 		MaxImageSize:        MaxImageSize.Clone(),
 		EStargz:             EStargzFlag.Clone(),
+		StatsFile:           StatsFileFlag.Clone(),
 	}
 }
 
@@ -127,6 +136,7 @@ func (f *ImageFlagGroup) Flags() []Flagger {
 		f.ImageSources,
 		f.MaxImageSize,
 		f.EStargz,
+		f.StatsFile,
 	}
 }
 
@@ -161,6 +171,7 @@ func (f *ImageFlagGroup) ToOptions(opts *Options) error {
 		ImageSources:        xstrings.ToTSlice[ftypes.ImageSource](f.ImageSources.Value()),
 		MaxImageSize:        maxSize,
 		EStargz:             f.EStargz.Value(),
+		StatsFile:           f.StatsFile.Value(),
 	}
 	return nil
 }

@@ -645,6 +645,7 @@ func (r *runner) initScannerConfig(ctx context.Context, opts flag.Options) (Scan
 			NoProgress:        opts.NoProgress || opts.Quiet,
 			Insecure:          opts.Insecure,
 			EStargz:           opts.ImageOptions.EStargz,
+		StatsFile:         opts.ImageOptions.StatsFile,
 			RepoBranch:        opts.RepoBranch,
 			RepoCommit:        opts.RepoCommit,
 			RepoTag:           opts.RepoTag,

@@ -46,6 +46,11 @@ type Option struct {
 	// Only static-path analyzers are supported; falls back to full download otherwise.
 	EStargz bool
 
+	// StatsFile is an optional path to write per-layer file statistics as JSON.
+	// When set, each scanned (non-cached) layer reports every file with its name,
+	// size, type, and whether any analyzer required it.
+	StatsFile string
+
 	// For image scanning
 	ImageOption types.ImageOptions
 

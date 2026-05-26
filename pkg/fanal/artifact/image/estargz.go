@@ -184,28 +184,28 @@ func (a Artifact) inspectLayerEStargz(
 	ctx context.Context,
 	layer types.Layer,
 	disabled []analyzer.Type,
-) (types.BlobInfo, int64, error) {
+) (types.BlobInfo, int64, LayerStat, error) {
 	// Resolve the v1.Layer to get compressed digest and size.
 	h, err := v1.NewHash(layer.DiffID)
 	if err != nil {
-		return types.BlobInfo{}, 0, xerrors.Errorf("invalid diff ID %s: %w", layer.DiffID, err)
+		return types.BlobInfo{}, 0, LayerStat{}, xerrors.Errorf("invalid diff ID %s: %w", layer.DiffID, err)
 	}
 	v1Layer, err := a.image.LayerByDiffID(h)
 	if err != nil {
-		return types.BlobInfo{}, 0, xerrors.Errorf("get layer %s: %w", layer.DiffID, err)
+		return types.BlobInfo{}, 0, LayerStat{}, xerrors.Errorf("get layer %s: %w", layer.DiffID, err)
 	}
 	compressedDigest, err := v1Layer.Digest()
 	if err != nil {
-		return types.BlobInfo{}, 0, xerrors.Errorf("layer digest: %w", err)
+		return types.BlobInfo{}, 0, LayerStat{}, xerrors.Errorf("layer digest: %w", err)
 	}
 	compressedSize, err := v1Layer.Size()
 	if err != nil {
-		return types.BlobInfo{}, 0, xerrors.Errorf("layer size: %w", err)
+		return types.BlobInfo{}, 0, LayerStat{}, xerrors.Errorf("layer size: %w", err)
 	}
 
 	url, err := blobURL(a.image.Name(), compressedDigest)
 	if err != nil {
-		return types.BlobInfo{}, 0, err
+		return types.BlobInfo{}, 0, LayerStat{}, err
 	}
 
 	rr := newHTTPRangeReader(ctx, url, a.artifactOption.ImageOption.RegistryOptions, compressedSize)
@@ -221,12 +221,24 @@ func (a Artifact) inspectLayerEStargz(
 
 	composite, err := a.analyzer.PostAnalyzerFS()
 	if err != nil {
-		return types.BlobInfo{}, 0, xerrors.Errorf("post analysis filesystem: %w", err)
+		return types.BlobInfo{}, 0, LayerStat{}, xerrors.Errorf("post analysis filesystem: %w", err)
 	}
 	defer composite.Cleanup()
 
+	statsEnabled := a.artifactOption.StatsFile != ""
+	var layerFiles []FileStat
+
 	err = walker.WalkEStargz(sr, func(filePath string, info os.FileInfo) bool {
-		return a.analyzer.IsRequired(filePath, info, disabled)
+		isReq := a.analyzer.IsRequired(filePath, info, disabled)
+		if statsEnabled {
+			layerFiles = append(layerFiles, FileStat{
+				Name:     filePath,
+				Size:     info.Size(),
+				Type:     fileType(info),
+				Required: isReq,
+			})
+		}
+		return isReq
 	}, func(filePath string, info os.FileInfo, opener analyzer.Opener) error {
 		if err := a.analyzer.AnalyzeFile(egCtx, eg, limit, result, "", filePath, info, opener, disabled, opts); err != nil {
 			return xerrors.Errorf("analyze %s: %w", filePath, err)
@@ -247,15 +259,15 @@ func (a Artifact) inspectLayerEStargz(
 		return nil
 	})
 	if err != nil {
-		return types.BlobInfo{}, 0, xerrors.Errorf("estargz walk: %w", err)
+		return types.BlobInfo{}, 0, LayerStat{}, xerrors.Errorf("estargz walk: %w", err)
 	}
 
 	if err = eg.Wait(); err != nil {
-		return types.BlobInfo{}, 0, xerrors.Errorf("analyze: %w", err)
+		return types.BlobInfo{}, 0, LayerStat{}, xerrors.Errorf("analyze: %w", err)
 	}
 
 	if err = a.analyzer.PostAnalyze(ctx, composite, result, opts); err != nil {
-		return types.BlobInfo{}, 0, xerrors.Errorf("post analysis: %w", err)
+		return types.BlobInfo{}, 0, LayerStat{}, xerrors.Errorf("post analysis: %w", err)
 	}
 
 	result.Sort()
@@ -280,7 +292,7 @@ func (a Artifact) inspectLayerEStargz(
 	}
 
 	if err = a.handlerManager.PostHandle(ctx, result, &blobInfo); err != nil {
-		return types.BlobInfo{}, 0, xerrors.Errorf("post handler: %w", err)
+		return types.BlobInfo{}, 0, LayerStat{}, xerrors.Errorf("post handler: %w", err)
 	}
 
 	fetched := rr.BytesFetched()
@@ -290,5 +302,6 @@ func (a Artifact) inspectLayerEStargz(
 		log.Int64("layer_size", compressedSize),
 	)
 
-	return blobInfo, fetched, nil
+	stat := LayerStat{DiffID: layer.DiffID, Files: layerFiles}
+	return blobInfo, fetched, stat, nil
 }
