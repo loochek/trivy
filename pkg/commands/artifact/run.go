@@ -198,7 +198,7 @@ func (r *runner) Close(ctx context.Context) error {
 
 func (r *runner) ScanImage(ctx context.Context, opts flag.Options) (types.Report, error) {
 	// Disable the lock file scanning
-	opts.DisabledAnalyzers = analyzer.TypeLockfiles
+	opts.DisabledAnalyzers = append(opts.DisabledAnalyzers, analyzer.TypeLockfiles...)
 
 	var s InitializeScanService
 	switch {
@@ -252,7 +252,7 @@ func (r *runner) ScanRepository(ctx context.Context, opts flag.Options) (types.R
 	opts.PkgTypes = []string{types.PkgTypeLibrary}
 
 	// Disable the OS analyzers, individual package analyzers and SBOM analyzer
-	opts.DisabledAnalyzers = append(analyzer.TypeIndividualPkgs, analyzer.TypeOSes...)
+	opts.DisabledAnalyzers = append(opts.DisabledAnalyzers, append(analyzer.TypeIndividualPkgs, analyzer.TypeOSes...)...)
 	opts.DisabledAnalyzers = append(opts.DisabledAnalyzers, analyzer.TypeSBOM)
 
 	var s InitializeScanService
@@ -490,7 +490,6 @@ func checkOptions(ctx context.Context, opts flag.Options, targetKind TargetKind)
 func disabledAnalyzers(opts flag.Options) []analyzer.Type {
 	// Specified analyzers to be disabled depending on scanning modes
 	// e.g. The 'image' subcommand should disable the lock file scanning.
-	log.Debug("disabledAnalyzers: user-supplied", log.Any("disabled", opts.DisabledAnalyzers))
 	analyzers := opts.DisabledAnalyzers
 	// It doesn't analyze apk commands by default.
 	if !opts.ScanRemovedPkgs {
