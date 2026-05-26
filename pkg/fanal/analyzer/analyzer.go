@@ -648,3 +648,27 @@ func (ag AnalyzerGroup) IsRequired(filePath string, info os.FileInfo, disabled [
 	}
 	return false
 }
+
+// RequiredBy returns the types of all enabled analyzers and post-analyzers that
+// want the given file. Returns nil when no analyzer requires it.
+func (ag AnalyzerGroup) RequiredBy(filePath string, info os.FileInfo, disabled []Type) []Type {
+	cleanPath := strings.TrimLeft(filePath, "/")
+	var types []Type
+	for _, a := range ag.analyzers {
+		if slices.Contains(disabled, a.Type()) {
+			continue
+		}
+		if ag.filePatterns[a.Type()].Match(cleanPath) || a.Required(cleanPath, info) {
+			types = append(types, a.Type())
+		}
+	}
+	for _, a := range ag.postAnalyzers {
+		if slices.Contains(disabled, a.Type()) {
+			continue
+		}
+		if ag.filePatterns[a.Type()].Match(filePath) || a.Required(filePath, info) {
+			types = append(types, a.Type())
+		}
+	}
+	return types
+}

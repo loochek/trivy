@@ -229,16 +229,16 @@ func (a Artifact) inspectLayerEStargz(
 	var layerFiles []FileStat
 
 	err = walker.WalkEStargz(sr, func(filePath string, info os.FileInfo) bool {
-		isReq := a.analyzer.IsRequired(filePath, info, disabled)
+		requiredBy := a.analyzer.RequiredBy(filePath, info, disabled)
 		if statsEnabled {
 			layerFiles = append(layerFiles, FileStat{
-				Name:     filePath,
-				Size:     info.Size(),
-				Type:     fileType(info),
-				Required: isReq,
+				Name:       filePath,
+				Size:       info.Size(),
+				Type:       fileType(info),
+				RequiredBy: requiredBy,
 			})
 		}
-		return isReq
+		return len(requiredBy) > 0
 	}, func(filePath string, info os.FileInfo, opener analyzer.Opener) error {
 		if err := a.analyzer.AnalyzeFile(egCtx, eg, limit, result, "", filePath, info, opener, disabled, opts); err != nil {
 			return xerrors.Errorf("analyze %s: %w", filePath, err)

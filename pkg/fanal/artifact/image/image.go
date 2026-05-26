@@ -513,10 +513,10 @@ func (a Artifact) inspectLayer(ctx context.Context, layer types.Layer, disabled 
 	opqDirs, whFiles, err := a.walker.Walk(cr, func(filePath string, info os.FileInfo, opener analyzer.Opener) error {
 		if statsEnabled {
 			layerFiles = append(layerFiles, FileStat{
-				Name:     filePath,
-				Size:     info.Size(),
-				Type:     fileType(info),
-				Required: a.analyzer.IsRequired(filePath, info, disabled),
+				Name:       filePath,
+				Size:       info.Size(),
+				Type:       fileType(info),
+				RequiredBy: a.analyzer.RequiredBy(filePath, info, disabled),
 			})
 		}
 

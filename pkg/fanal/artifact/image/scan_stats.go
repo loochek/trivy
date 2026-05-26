@@ -5,15 +5,16 @@ import (
 	"io/fs"
 	"os"
 
+	"github.com/aquasecurity/trivy/pkg/fanal/analyzer"
 	"github.com/aquasecurity/trivy/pkg/fanal/types"
 )
 
 // FileStat describes a single file encountered while walking a layer.
 type FileStat struct {
-	Name     string `json:"name"`
-	Size     int64  `json:"size"`
-	Type     string `json:"type"`
-	Required bool   `json:"required"`
+	Name       string          `json:"name"`
+	Size       int64           `json:"size"`
+	Type       string          `json:"type"`
+	RequiredBy []analyzer.Type `json:"required_by"` // nil → omitted; empty slice → file was seen but not required
 }
 
 // LayerStat describes one image layer and the files seen during its analysis.
