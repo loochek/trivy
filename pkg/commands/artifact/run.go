@@ -490,6 +490,7 @@ func checkOptions(ctx context.Context, opts flag.Options, targetKind TargetKind)
 func disabledAnalyzers(opts flag.Options) []analyzer.Type {
 	// Specified analyzers to be disabled depending on scanning modes
 	// e.g. The 'image' subcommand should disable the lock file scanning.
+	log.Debug("disabledAnalyzers: user-supplied", log.Any("disabled", opts.DisabledAnalyzers))
 	analyzers := opts.DisabledAnalyzers
 	// It doesn't analyze apk commands by default.
 	if !opts.ScanRemovedPkgs {
