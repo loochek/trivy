@@ -198,7 +198,7 @@ func (r *runner) Close(ctx context.Context) error {
 
 func (r *runner) ScanImage(ctx context.Context, opts flag.Options) (types.Report, error) {
 	// Disable the lock file scanning
-	opts.DisabledAnalyzers = analyzer.TypeLockfiles
+	opts.DisabledAnalyzers = append(opts.DisabledAnalyzers, analyzer.TypeLockfiles...)
 
 	var s InitializeScanService
 	switch {
@@ -252,7 +252,7 @@ func (r *runner) ScanRepository(ctx context.Context, opts flag.Options) (types.R
 	opts.PkgTypes = []string{types.PkgTypeLibrary}
 
 	// Disable the OS analyzers, individual package analyzers and SBOM analyzer
-	opts.DisabledAnalyzers = append(analyzer.TypeIndividualPkgs, analyzer.TypeOSes...)
+	opts.DisabledAnalyzers = append(opts.DisabledAnalyzers, append(analyzer.TypeIndividualPkgs, analyzer.TypeOSes...)...)
 	opts.DisabledAnalyzers = append(opts.DisabledAnalyzers, analyzer.TypeSBOM)
 
 	var s InitializeScanService
@@ -644,6 +644,8 @@ func (r *runner) initScannerConfig(ctx context.Context, opts flag.Options) (Scan
 			Offline:           opts.OfflineScan,
 			NoProgress:        opts.NoProgress || opts.Quiet,
 			Insecure:          opts.Insecure,
+			EStargz:           opts.ImageOptions.EStargz,
+		StatsFile:         opts.ImageOptions.StatsFile,
 			RepoBranch:        opts.RepoBranch,
 			RepoCommit:        opts.RepoCommit,
 			RepoTag:           opts.RepoTag,

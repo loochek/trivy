@@ -625,3 +625,50 @@ func (ag AnalyzerGroup) StaticPaths(disabled []Type) ([]string, bool) {
 	// Remove duplicates
 	return lo.Uniq(paths), true
 }
+
+// IsRequired returns true if any enabled analyzer or post-analyzer wants the given file.
+// Used by the eStargz TOC walker to decide which files to fetch via Range requests.
+func (ag AnalyzerGroup) IsRequired(filePath string, info os.FileInfo, disabled []Type) bool {
+	cleanPath := strings.TrimLeft(filePath, "/")
+	for _, a := range ag.analyzers {
+		if slices.Contains(disabled, a.Type()) {
+			continue
+		}
+		if ag.filePatterns[a.Type()].Match(cleanPath) || a.Required(cleanPath, info) {
+			return true
+		}
+	}
+	for _, a := range ag.postAnalyzers {
+		if slices.Contains(disabled, a.Type()) {
+			continue
+		}
+		if ag.filePatterns[a.Type()].Match(filePath) || a.Required(filePath, info) {
+			return true
+		}
+	}
+	return false
+}
+
+// RequiredBy returns the types of all enabled analyzers and post-analyzers that
+// want the given file. Returns nil when no analyzer requires it.
+func (ag AnalyzerGroup) RequiredBy(filePath string, info os.FileInfo, disabled []Type) []Type {
+	cleanPath := strings.TrimLeft(filePath, "/")
+	var types []Type
+	for _, a := range ag.analyzers {
+		if slices.Contains(disabled, a.Type()) {
+			continue
+		}
+		if ag.filePatterns[a.Type()].Match(cleanPath) || a.Required(cleanPath, info) {
+			types = append(types, a.Type())
+		}
+	}
+	for _, a := range ag.postAnalyzers {
+		if slices.Contains(disabled, a.Type()) {
+			continue
+		}
+		if ag.filePatterns[a.Type()].Match(filePath) || a.Required(filePath, info) {
+			types = append(types, a.Type())
+		}
+	}
+	return types
+}

@@ -7,6 +7,7 @@ import (
 
 	"golang.org/x/xerrors"
 
+	"github.com/aquasecurity/trivy/pkg/fanal/analyzer"
 	ftypes "github.com/aquasecurity/trivy/pkg/fanal/types"
 	"github.com/aquasecurity/trivy/pkg/log"
 	"github.com/aquasecurity/trivy/pkg/types"
@@ -135,6 +136,12 @@ var (
 		ConfigName: "scan.disable-telemetry",
 		Usage:      "disable sending anonymous usage data to Aqua",
 	}
+	SkipAnalyzersFlag = Flag[[]string]{
+		Name:       "skip-analyzers",
+		ConfigName: "scan.skip-analyzers",
+		Default:    []string{},
+		Usage:      "comma-separated list of analyzer types to skip (e.g. gobinary,rustbinary)",
+	}
 )
 
 type ScanFlagGroup struct {
@@ -151,6 +158,7 @@ type ScanFlagGroup struct {
 	DistroFlag        *Flag[string]
 	SkipVersionCheck  *Flag[bool]
 	DisableTelemetry  *Flag[bool]
+	SkipAnalyzers     *Flag[[]string]
 }
 
 type ScanOptions struct {
@@ -184,6 +192,7 @@ func NewScanFlagGroup() *ScanFlagGroup {
 		DistroFlag:        DistroFlag.Clone(),
 		SkipVersionCheck:  SkipVersionCheckFlag.Clone(),
 		DisableTelemetry:  DisableTelemetryFlag.Clone(),
+		SkipAnalyzers:     SkipAnalyzersFlag.Clone(),
 	}
 }
 
@@ -206,6 +215,7 @@ func (f *ScanFlagGroup) Flags() []Flagger {
 		f.DistroFlag,
 		f.SkipVersionCheck,
 		f.DisableTelemetry,
+		f.SkipAnalyzers,
 	}
 }
 
@@ -247,6 +257,9 @@ func (f *ScanFlagGroup) ToOptions(opts *Options) error {
 		Distro:            distro,
 		SkipVersionCheck:  f.SkipVersionCheck.Value(),
 		DisableTelemetry:  f.DisableTelemetry.Value(),
+	}
+	for _, name := range f.SkipAnalyzers.Value() {
+		opts.DisabledAnalyzers = append(opts.DisabledAnalyzers, analyzer.Type(name))
 	}
 	return nil
 }
